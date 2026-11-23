@@ -36,6 +36,20 @@ double eye4x4[4][4]={{1.0, 0.0, 0.0, 0.0},
                     {0.0, 0.0, 1.0, 0.0},
                     {0.0, 0.0, 0.0, 1.0}};
 
+// Per-thread random number state
+static __thread unsigned short rng_state[3];
+__thread unsigned long int thread_rays;
+
+void seedThreadRNG(int tid)
+{
+ rng_state[0]=(unsigned short)tid;
+}
+
+double rand01(void)
+{
+ return erand48(rng_state);
+}
+
 /////////////////////////////////////////////
 // Primitive data structure section
 /////////////////////////////////////////////
@@ -327,9 +341,9 @@ void cosWeightedSample(struct point3D *n, struct point3D *d)
  char line[1024];
  
  // Random sample on hemisphere with cosine-weighted distribution
- u1=drand48();
+ u1=rand01();
  r=sqrt(u1);
- theta=2*PI*drand48();
+ theta=2*PI*rand01();
  x=r*cos(theta);
  y=r*sin(theta);
  z=sqrt(1.0-(x*x)-(y*y));

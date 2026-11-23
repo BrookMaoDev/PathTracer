@@ -156,6 +156,8 @@ inline void rayPosition(struct ray3D *ray, double lambda, struct point3D *pos)
  pos->pw=1;
 }
 
+extern __thread unsigned long int thread_rays;	// Rays created by this thread, summed into NUM_RAYS after rendering
+
 inline struct ray3D *newRay(struct point3D *p0, struct point3D *d)
 {
  // Allocate a new ray structure and initialize it to the values
@@ -166,6 +168,7 @@ inline struct ray3D *newRay(struct point3D *p0, struct point3D *d)
  if (!ray) fprintf(stderr,"Out of memory allocating ray structure!\n");
  else
  {
+  thread_rays++;
   memcpy(&ray->p0,p0,sizeof(struct point3D));
   memcpy(&ray->d,d,sizeof(struct point3D));
   ray->rayPos=&rayPosition;
@@ -200,6 +203,10 @@ void cylCoordinates(struct object3D *plane, double a, double b, double *x, doubl
 void planeSample(struct object3D *plane, double *x, double *y, double *z);
 void sphereSample(struct object3D *plane, double *x, double *y, double *z);
 void cylSample(struct object3D *plane, double *x, double *y, double *z);
+
+// Per-thread random numbers: call seedThreadRNG() once in each thread before that thread uses rand01()
+void seedThreadRNG(int tid);
+double rand01(void);
 
 // Importance Sampling for BRDF of diffuse surfaces
 void cosWeightedSample(struct point3D *n, struct point3D *d);

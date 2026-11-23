@@ -32,6 +32,9 @@
 ********************************************************************************/
 
 #include "utils_path.h"			// <-- This includes PathTracer.h
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 //#define __USE_IS			// Use importance sampling for diffuse materials
 //#define __USE_ES			// Use explicit light sampling
 //#define __DEBUG			// <-- Use this to turn on/off debugging output
@@ -248,6 +251,13 @@ int main(int argc, char *argv[])
 
  t1=time(NULL);
 
+#ifdef _OPENMP
+#pragma omp parallel
+ seedThreadRNG(omp_get_thread_num());
+#else
+ seedThreadRNG(0);
+#endif
+
  fprintf(stderr,"Rendering pass... ");
  for (k=0; k<num_samples; k++)
  {
@@ -258,8 +268,8 @@ int main(int argc, char *argv[])
    for (i=0;i<sx;i++)
    {
     // Random sample within the pixel's area
-    pc.px=(cam->wl+((i+(drand48()-.5))*du));
-    pc.py=(cam->wt+((j+(drand48()-.5))*dv));
+    pc.px=(cam->wl+((i+(rand01()-.5))*du));
+    pc.py=(cam->wt+((j+(rand01()-.5))*dv));
     pc.pz=cam->f;
     pc.pw=1;
 
@@ -292,6 +302,9 @@ int main(int argc, char *argv[])
   if (k%25==0)  dataOutput(rgbIm,sx,&output_name[0]);  		// Update output image every 25 passes
  } // End for k 
  t2=time(NULL);
+
+#pragma omp parallel reduction(+:NUM_RAYS)
+ NUM_RAYS+=thread_rays;
 
  fprintf(stderr,"\nDone!\n");
 
