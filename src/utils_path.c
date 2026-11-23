@@ -1125,8 +1125,11 @@ void dataOutput(double *im, int sx, char *name)
  // Histogram
  for (i=0; i<sx*sx*3; i++)
  {
-  for (j=0;j<1000; j++)
-   if (*(imT+i)>=(biw*j)&&*(imT+i)<(biw*(j+1))) {HDRhist[j]++; break;}
+  if (*(imT+i)>=0.0)		// Also false for NaN
+  {
+   j=(int)(*(imT+i)/biw);
+   if (j<1000) HDRhist[j]++;
+  }
  }
 
  pct=.005*(sx*sx*3);

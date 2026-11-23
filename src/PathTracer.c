@@ -299,7 +299,7 @@ int main(int argc, char *argv[])
     }
    } // end for i
   } // end for j  
-  if (k%25==0)  dataOutput(rgbIm,sx,&output_name[0]);  		// Update output image every 25 passes
+  if (k%100==0)  dataOutput(rgbIm,sx,&output_name[0]);  		// Update output image every 100 passes
  } // End for k 
  t2=time(NULL);
 
