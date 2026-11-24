@@ -218,11 +218,11 @@ struct object3D *newCyl(double diffPct, double reflPct, double tranPct, double r
 
 // Functions to obtain surface coordinates on objects
 void planeCoordinates(struct object3D *plane, double a, double b, double *x, double *y, double *z);
-void sphereCoordinates(struct object3D *plane, double a, double b, double *x, double *y, double *z);
-void cylCoordinates(struct object3D *plane, double a, double b, double *x, double *y, double *z);
+void sphereCoordinates(struct object3D *sphere, double a, double b, double *x, double *y, double *z);
+void cylCoordinates(struct object3D *cyl, double a, double b, double *x, double *y, double *z);
 void planeSample(struct object3D *plane, double *x, double *y, double *z);
-void sphereSample(struct object3D *plane, double *x, double *y, double *z);
-void cylSample(struct object3D *plane, double *x, double *y, double *z);
+void sphereSample(struct object3D *sphere, double *x, double *y, double *z);
+void cylSample(struct object3D *cyl, double *x, double *y, double *z);
 
 // Per-thread random numbers: call seedThreadRNG() once in each thread before that thread uses rand01()
 void seedThreadRNG(int tid);

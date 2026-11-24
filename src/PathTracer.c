@@ -171,7 +171,7 @@ int main(int argc, char *argv[])
 
  fprintf(stderr,"Rendering image at %d x %d\n",sx,sx);
  fprintf(stderr,"Recursion depth = %d\n",MAX_DEPTH);
- fprintf(stderr,"NUmber of samples = %d\n",num_samples);
+ fprintf(stderr,"Number of samples = %d\n",num_samples);
  fprintf(stderr,"Output file name: %s\n",output_name);
 
  object_list=NULL;
