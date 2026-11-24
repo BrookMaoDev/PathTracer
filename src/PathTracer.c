@@ -89,6 +89,28 @@ void findFirstHit(struct ray3D *ray, double *lambda, struct object3D *Os, struct
  }
 }
 
+void sampleAround(struct point3D *axis, double costheta, double phi, struct point3D *d)
+{
+ // Returns in d the unit direction at angle acos(costheta) from the unit vector axis, rotated by phi around it
+ struct point3D helper={1,0,0,1};
+ if (fabs(axis->px)>.9)		// helper must not be parallel to axis
+ {
+  helper.px=0;
+  helper.py=1;
+ }
+ struct point3D *u=cross(axis,&helper);
+ normalize(u);
+ struct point3D *v=cross(axis,u);
+
+ double sintheta=sqrt(1-costheta*costheta);
+ d->px=costheta*axis->px+sintheta*(cos(phi)*u->px+sin(phi)*v->px);
+ d->py=costheta*axis->py+sintheta*(cos(phi)*u->py+sin(phi)*v->py);
+ d->pz=costheta*axis->pz+sintheta*(cos(phi)*u->pz+sin(phi)*v->pz);
+ d->pw=1;
+ free(u);
+ free(v);
+}
+
 void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct object3D *Os, int CEL)
 {
  // Trace one light path through the scene.
@@ -161,33 +183,46 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
  // Make the normal face the incoming ray
  if (dot(&n,&ray->d)>0) scaleVector(-1,&n);
 
- // Orthonormal basis u, v perpendicular to n (axis must not be parallel to n)
- struct point3D axis={1,0,0,1};
- if (fabs(n.px)>.9)
- {
-  axis.px=0;
-  axis.py=1;
- }
- struct point3D *u=cross(&n,&axis);
- normalize(u);
- struct point3D *v=cross(&n,u);
-
- // Uniform hemisphere sample around n
- double costheta=rand01();
- double sintheta=sqrt(1-costheta*costheta);
- double phi=2*PI*rand01();
+ // Pick this bounce's lobe; each branch sets the new direction d and the throughput factor (R,G,B)
  struct point3D d;
- d.px=costheta*n.px+sintheta*(cos(phi)*u->px+sin(phi)*v->px);
- d.py=costheta*n.py+sintheta*(cos(phi)*u->py+sin(phi)*v->py);
- d.pz=costheta*n.pz+sintheta*(cos(phi)*u->pz+sin(phi)*v->pz);
- d.pw=1;
- free(u);
- free(v);
+ dice=rand01();
+ if (dice<obj->diffPct)
+ {
+  // Uniform hemisphere sample around n
+  double costheta=rand01();
+  sampleAround(&n,costheta,2*PI*rand01(),&d);
+  R=obj->col.R*2*costheta;
+  G=obj->col.G*2*costheta;
+  B=obj->col.B*2*costheta;
+ }
+ else if (dice<obj->diffPct+obj->reflPct)
+ {
+  // Mirror direction r = d - 2(d.n)n, tilted by a Gaussian angle with sigma refl_sig (Box-Muller)
+  struct point3D r=n;
+  scaleVector(-2*dot(&ray->d,&n),&r);
+  addVectors(&ray->d,&r);
+  do
+  {
+   double tilt=obj->refl_sig*sqrt(-2*log(1-rand01()))*cos(2*PI*rand01());
+   sampleAround(&r,cos(tilt),2*PI*rand01(),&d);
+  } while (dot(&d,&n)<=0);	// Re-sample directions that point into the surface
+  R=obj->col.R;
+  G=obj->col.G;
+  B=obj->col.B;
+ }
+ else
+ {
+  // Refraction: not implemented yet (part c), so end the path
+  col->R=ray->Ir;
+  col->G=ray->Ig;
+  col->B=ray->Ib;
+  return;
+ }
 
  next_ray=newRay(&p,&d);
- next_ray->R=ray->R*obj->col.R*2*costheta;
- next_ray->G=ray->G*obj->col.G*2*costheta;
- next_ray->B=ray->B*obj->col.B*2*costheta;
+ next_ray->R=ray->R*R;
+ next_ray->G=ray->G*G;
+ next_ray->B=ray->B*B;
  next_ray->Ir=ray->Ir;
  next_ray->Ig=ray->Ig;
  next_ray->Ib=ray->Ib;
