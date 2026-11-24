@@ -118,11 +118,64 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   return;
  }
 
- ///////////////////////////////////////////////////////
- // TO DO: Complete this function. Refer to the notes
- // if you are unsure what to do here.
- ///////////////////////////////////////////////////////
-   
+ findFirstHit(ray,&lambda,Os,&obj,&p,&n,&a,&b);
+ if (obj==NULL)
+ {
+  col->R=ray->Ir;
+  col->G=ray->Ig;
+  col->B=ray->Ib;
+  return;
+ }
+
+ if (obj->isLightSource)
+ {
+  if (CEL)
+  {
+   ray->Ir+=ray->R*obj->col.R;
+   ray->Ig+=ray->G*obj->col.G;
+   ray->Ib+=ray->B*obj->col.B;
+  }
+  col->R=ray->Ir;
+  col->G=ray->Ig;
+  col->B=ray->Ib;
+  return;
+ }
+
+ // Make the normal face the incoming ray
+ if (dot(&n,&ray->d)>0) scaleVector(-1,&n);
+
+ // Orthonormal basis u, v perpendicular to n (axis must not be parallel to n)
+ struct point3D axis={1,0,0,1};
+ if (fabs(n.px)>.9)
+ {
+  axis.px=0;
+  axis.py=1;
+ }
+ struct point3D *u=cross(&n,&axis);
+ normalize(u);
+ struct point3D *v=cross(&n,u);
+
+ // Uniform hemisphere sample around n
+ double costheta=rand01();
+ double sintheta=sqrt(1-costheta*costheta);
+ double phi=2*PI*rand01();
+ struct point3D d;
+ d.px=costheta*n.px+sintheta*(cos(phi)*u->px+sin(phi)*v->px);
+ d.py=costheta*n.py+sintheta*(cos(phi)*u->py+sin(phi)*v->py);
+ d.pz=costheta*n.pz+sintheta*(cos(phi)*u->pz+sin(phi)*v->pz);
+ d.pw=1;
+ free(u);
+ free(v);
+
+ next_ray=newRay(&p,&d);
+ next_ray->R=ray->R*obj->col.R*2*costheta;
+ next_ray->G=ray->G*obj->col.G*2*costheta;
+ next_ray->B=ray->B*obj->col.B*2*costheta;
+ next_ray->Ir=ray->Ir;
+ next_ray->Ig=ray->Ig;
+ next_ray->Ib=ray->Ib;
+ PathTrace(next_ray,depth+1,col,obj,1);
+ free(next_ray);
 }
 
 int main(int argc, char *argv[])
