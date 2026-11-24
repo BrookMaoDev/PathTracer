@@ -45,6 +45,7 @@ struct object3D *object_list;
 struct textureNode *texture_list;
 unsigned long int NUM_RAYS;
 int MAX_DEPTH;
+#define RR_START_DEPTH 3		// Russian roulette applies from this depth on (camera ray is depth 1)
 
 #include "buildScene.c"			// Import scene definition
 
@@ -139,6 +140,22 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   col->G=ray->Ig;
   col->B=ray->Ib;
   return;
+ }
+
+ // Russian roulette: continue with probability q, and boost survivors by 1/q so the estimate stays unbiased
+ if (depth>=RR_START_DEPTH)
+ {
+  double q=fmin(1,fmax(ray->R,fmax(ray->G,ray->B)));
+  if (rand01()>=q)
+  {
+   col->R=ray->Ir;
+   col->G=ray->Ig;
+   col->B=ray->Ib;
+   return;
+  }
+  ray->R/=q;
+  ray->G/=q;
+  ray->B/=q;
  }
 
  // Make the normal face the incoming ray
