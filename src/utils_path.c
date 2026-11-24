@@ -79,11 +79,11 @@ inline void rayTransform(struct ray3D *ray_orig, struct ray3D *ray_transformed, 
 {
  // Transforms a ray using the inverse transform for the specified object. This is so that we can
  // use the intersection test for the canonical object. Note that this has to be done carefully!
-
- ///////////////////////////////////////////
- // TO DO: Complete this function
- ///////////////////////////////////////////
-  
+ *ray_transformed = *ray_orig; // Copies p0, d, and the rayPos function pointer
+ matVecMult(obj->Tinv, &ray_transformed->p0);
+ ray_transformed->d.pw = 0; // w=0 so the translation in Tinv doesn't apply to the direction
+ matVecMult(obj->Tinv, &ray_transformed->d);
+ ray_transformed->d.pw = 1; // Restore the codebase convention of w=1
 }
 
 inline void normalTransform(struct point3D *n_orig, struct point3D *n_transformed, struct object3D *obj)
@@ -91,11 +91,12 @@ inline void normalTransform(struct point3D *n_orig, struct point3D *n_transforme
  // Computes the normal at an affinely transformed point given the original normal and the
  // object's inverse transformation. From the notes:
  // n_transformed=A^-T*n normalized.
-
- ///////////////////////////////////////////
- // TO DO: Complete this function
- ///////////////////////////////////////////
-    
+ *n_transformed = *n_orig;
+ double TinvT[4][4];
+ matTranspose(obj->Tinv, TinvT);
+ matVecMult(TinvT, n_transformed);
+ n_transformed->pw = 1;	// The transpose moved Tinv's translation into the bottom row, so pw is junk here
+ normalize(n_transformed);
 }
 
 /////////////////////////////////////////////
@@ -116,6 +117,12 @@ void insertObject(struct object3D *o, struct object3D **list)
   (*(list))->next=o;
  }
 }
+
+// Extent of the canonical plane
+static const double plane_left = -1;
+static const double plane_right = 1;
+static const double plane_bottom = -1;
+static const double plane_top = 1;
 
 struct object3D *newPlane(double diffPct, double reflPct, double tranPct, double r, double g, double b, double refl_sig, double r_index)
 {
@@ -206,50 +213,224 @@ struct object3D *newSphere(double diffPct, double reflPct, double tranPct, doubl
 
 struct object3D *newCyl(double diffPct, double reflPct, double tranPct, double r, double g, double b, double refl_sig, double r_index)
 {
- ///////////////////////////////////////////////////////////////////////////////////////
- // TO DO:
- //	Complete the code to create and initialize a new cylinder object.
- ///////////////////////////////////////////////////////////////////////////////////////  
-  
+ // Canonical cylinder: x^2 + y^2 = 1 for |z| <= 1, closed with caps at z = 1 and z = -1.
+ struct object3D *cyl=(struct object3D *)calloc(1,sizeof(struct object3D));
+
+ if (!cyl) fprintf(stderr,"Unable to allocate new cylinder, out of memory!\n");
+ else
+ {
+  cyl->diffPct=diffPct;
+  cyl->reflPct=reflPct;
+  cyl->tranPct=tranPct;
+  cyl->col.R=r;
+  cyl->col.G=g;
+  cyl->col.B=b;
+  cyl->refl_sig=refl_sig;
+  cyl->r_index=r_index;
+  cyl->intersect=&cylIntersect;
+  cyl->surfaceCoords=&cylCoordinates;
+  cyl->randomPoint=&cylSample;
+  cyl->texImg=NULL;
+  cyl->normalMap=NULL;
+  memcpy(&cyl->T[0][0],&eye4x4[0][0],16*sizeof(double));
+  memcpy(&cyl->Tinv[0][0],&eye4x4[0][0],16*sizeof(double));
+  cyl->textureMap=&texMap;
+  cyl->frontAndBack=0;
+  cyl->normalMapped=0;
+  cyl->isCSG=0;
+  cyl->isLightSource=0;
+  cyl->LSweight=1.0;
+  cyl->CSGnext=NULL;
+  cyl->next=NULL;
+ }
+ return(cyl);
 }
 
 
-///////////////////////////////////////////////////////////////////////////////////////
-// TO DO:
-//	Complete the functions that compute intersections for the canonical plane
-//      and canonical sphere with a given ray. This is the most fundamental component
-//      of the raytracer.
-///////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////
+// Intersection tests for canonical objects
+/////////////////////////////////////////////
 void planeIntersect(struct object3D *plane, struct ray3D *ray, double *lambda, struct point3D *p, struct point3D *n, double *a, double *b)
 {
  // Computes and returns the value of 'lambda' at the intersection
  // between the specified ray and the specified canonical plane.
+ struct ray3D ray_transformed;
+ struct point3D p_canonical;
+ rayTransform(ray, &ray_transformed, plane);
 
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////
-   
+ n->px = 0;
+ n->py = 0;
+ n->pz = 1;
+ n->pw = 1;
+
+ // Ray is (nearly) parallel to the plane, so there is no intersection
+ if (fabs(dot(&ray_transformed.d, n)) < EPSILON)
+ {
+  *lambda = -1;
+  return;
+ }
+
+ *lambda = -dot(&ray_transformed.p0, n) / dot(&ray_transformed.d, n);
+
+ // The bounds check must use the hit point on the canonical plane, not the world-space point
+ ray_transformed.rayPos(&ray_transformed, *lambda, &p_canonical);
+ if (p_canonical.px < plane_left || p_canonical.px > plane_right || p_canonical.py < plane_bottom || p_canonical.py > plane_top)
+ {
+  *lambda = -1;
+  return;
+ }
+
+ // Texture coordinates in [0,1], the inverse of the mapping in planeCoordinates
+ *a = (p_canonical.px - plane_left) / (plane_right - plane_left);
+ *b = (p_canonical.py - plane_bottom) / (plane_top - plane_bottom);
+
+ ray->rayPos(ray, *lambda, p);
+
+ if (plane->normalMap) normMap(plane->normalMap, *a, *b, n);
+ normalTransform(n, n, plane);
+
+ // If both sides should be lit, make the normal face the side the ray came from
+ if (plane->frontAndBack && dot(n, &ray->d) > 0)
+ {
+  n->px = -n->px;
+  n->py = -n->py;
+  n->pz = -n->pz;
+ }
 }
 
 void sphereIntersect(struct object3D *sphere, struct ray3D *ray, double *lambda, struct point3D *p, struct point3D *n, double *a, double *b)
 {
  // Computes and returns the value of 'lambda' at the intersection
  // between the specified ray and the specified canonical sphere.
+ struct ray3D ray_transformed;
+ struct point3D p_canonical;
+ rayTransform(ray, &ray_transformed, sphere);
 
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////
-    
+ // Solve ||p0 + lambda*d||^2 = 1 for the unit sphere at the origin (centre c = 0, radius r = 1).
+ // Using the notes' form lambda = -B/A +/- sqrt(D)/A with:
+ double A = dot(&ray_transformed.d, &ray_transformed.d);
+ double B = dot(&ray_transformed.p0, &ray_transformed.d);
+ double C = dot(&ray_transformed.p0, &ray_transformed.p0) - 1;
+ double D = B * B - A * C;
+
+ // No real solutions, so the ray misses the sphere
+ if (D < 0)
+ {
+  *lambda = -1;
+  return;
+ }
+
+ // lambda1 <= lambda2. Take the smallest solution in front of the ray. If lambda1 is behind the
+ // ray (or is the surface the ray just left) but lambda2 isn't, the ray started inside the sphere.
+ double lambda1 = (-B - sqrt(D)) / A;
+ double lambda2 = (-B + sqrt(D)) / A;
+ if (lambda1 > EPSILON) *lambda = lambda1;
+ else if (lambda2 > EPSILON) *lambda = lambda2;
+ else
+ {
+  *lambda = -1;
+  return;
+ }
+
+ ray_transformed.rayPos(&ray_transformed, *lambda, &p_canonical);
+
+ // Texture coordinates in [0,1] from the spherical angles, using z as the polar axis:
+ // theta = atan2(y, x) in (-PI, PI], phi = asin(z) in [-PI/2, PI/2]
+ double theta = atan2(p_canonical.py, p_canonical.px);
+ if (theta < 0) theta += 2 * PI;
+ double phi = asin(fmin(1, fmax(-1, p_canonical.pz)));	// Clamp so rounding can't push asin out of its domain
+ *a = theta / (2 * PI);
+ *b = (phi + PI / 2) / PI;
+
+ ray->rayPos(ray, *lambda, p);
+
+ // On the unit sphere the outward normal is the hit point itself. It is unit length in canonical
+ // space, but still has to be transformed to world space (normalTransform renormalizes it).
+ // Not flipped: sphere normals always point outward.
+ *n = p_canonical;
+ if (sphere->normalMap) normMap(sphere->normalMap, *a, *b, n);
+ normalTransform(n, n, sphere);
 }
 
 void cylIntersect(struct object3D *cylinder, struct ray3D *r, double *lambda, struct point3D *p, struct point3D *n, double *a, double *b)
 {
  // Computes and returns the value of 'lambda' at the intersection
  // between the specified ray and the specified canonical cylinder.
+ // Canonical cylinder (from the notes): x^2 + y^2 = 1 for |z| <= 1, closed with caps at z = 1 and z = -1.
+ struct ray3D ray_transformed;
+ struct point3D p_canonical;
+ rayTransform(r, &ray_transformed, cylinder);
 
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////  
+ struct point3D *p0 = &ray_transformed.p0;
+ struct point3D *d = &ray_transformed.d;
+ enum { CYL_SIDE, CYL_TOP, CYL_BOTTOM } hit_type = CYL_SIDE;
+ double candidates[2];
+ int i;
+
+ *lambda = -1;
+
+ // Side wall: substituting the ray into x^2 + y^2 = 1 gives qa*lambda^2 + qb*lambda + qc = 0 with
+ // qa = dx^2 + dy^2, qb = 2(px*dx + py*dy), qc = px^2 + py^2 - 1.
+ // qa ~ 0 means the ray is parallel to the z axis, so it can't hit the side wall.
+ double qa = d->px * d->px + d->py * d->py;
+ double qb = 2 * (p0->px * d->px + p0->py * d->py);
+ double qc = p0->px * p0->px + p0->py * p0->py - 1;
+ double disc = qb * qb - 4 * qa * qc;
+ if (qa > EPSILON && disc >= 0)
+ {
+  candidates[0] = (-qb - sqrt(disc)) / (2 * qa);
+  candidates[1] = (-qb + sqrt(disc)) / (2 * qa);
+  for (i = 0; i < 2; i++)
+  {
+   // Only the part of the wall with |z| <= 1 is on the cylinder
+   if (candidates[i] > EPSILON && fabs(p0->pz + candidates[i] * d->pz) <= 1 &&
+       (*lambda < 0 || candidates[i] < *lambda))
+   {
+    *lambda = candidates[i];
+    hit_type = CYL_SIDE;
+   }
+  }
+ }
+
+ // Caps: solve pz + lambda*dz = 1 (top) and = -1 (bottom), keeping hits inside x^2 + y^2 <= 1.
+ // dz ~ 0 means the ray is parallel to the caps, so it can't hit them.
+ if (fabs(d->pz) > EPSILON)
+ {
+  candidates[0] = (1 - p0->pz) / d->pz;		// Top cap
+  candidates[1] = (-1 - p0->pz) / d->pz;	// Bottom cap
+  for (i = 0; i < 2; i++)
+  {
+   double x = p0->px + candidates[i] * d->px;
+   double y = p0->py + candidates[i] * d->py;
+   if (candidates[i] > EPSILON && x * x + y * y <= 1 &&
+       (*lambda < 0 || candidates[i] < *lambda))
+   {
+    *lambda = candidates[i];
+    hit_type = (i == 0) ? CYL_TOP : CYL_BOTTOM;
+   }
+  }
+ }
+
+ if (*lambda < 0) return;
+
+ ray_transformed.rayPos(&ray_transformed, *lambda, &p_canonical);
+
+ // Texture coordinates in [0,1]: a from the angle around the z axis, b from the height (inverse of cylCoordinates).
+ // atan2 rather than acos(x) since acos only covers [0, PI] and can't tell y > 0 from y < 0.
+ double theta = atan2(p_canonical.py, p_canonical.px);
+ if (theta < 0) theta += 2 * PI;
+ *a = theta / (2 * PI);
+ *b = (p_canonical.pz + 1) / 2;
+
+ r->rayPos(r, *lambda, p);
+
+ // Canonical outward normal: radial on the side wall (already unit length since x^2 + y^2 = 1), +/-z on the caps
+ n->px = (hit_type == CYL_SIDE) ? p_canonical.px : 0;
+ n->py = (hit_type == CYL_SIDE) ? p_canonical.py : 0;
+ n->pz = (hit_type == CYL_TOP) ? 1 : (hit_type == CYL_BOTTOM) ? -1 : 0;
+ n->pw = 1;
+ if (cylinder->normalMap) normMap(cylinder->normalMap, *a, *b, n);
+ normalTransform(n, n, cylinder);
 }
 
 /////////////////////////////////////////////////////////////////
@@ -260,10 +441,11 @@ void planeCoordinates(struct object3D *plane, double a, double b, double *x, dou
  // Return in (x,y,z) the coordinates of a point on the plane given by the 2 parameters a,b in [0,1].
  // 'a' controls displacement from the left side of the plane, 'b' controls displacement from the
  // bottom of the plane.
- 
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////   
+ struct point3D p = {plane_left + a * (plane_right - plane_left), plane_bottom + b * (plane_top - plane_bottom), 0, 1};
+ matVecMult(plane->T, &p);
+ *x = p.px;
+ *y = p.py;
+ *z = p.pz;
 }
 
 void sphereCoordinates(struct object3D *sphere, double a, double b, double *x, double *y, double *z)
@@ -271,10 +453,11 @@ void sphereCoordinates(struct object3D *sphere, double a, double b, double *x, d
  // Return in (x,y,z) the coordinates of a point on the plane given by the 2 parameters a,b.
  // 'a' in [0, 2*PI] corresponds to the spherical coordinate theta
  // 'b' in [-PI/2, PI/2] corresponds to the spherical coordinate phi
-
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////   
+ struct point3D p = {cos(a) * cos(b), sin(a) * cos(b), sin(b), 1};
+ matVecMult(sphere->T, &p);
+ *x = p.px;
+ *y = p.py;
+ *z = p.pz;
 }
 
 void cylCoordinates(struct object3D *cyl, double a, double b, double *x, double *y, double *z)
@@ -282,10 +465,12 @@ void cylCoordinates(struct object3D *cyl, double a, double b, double *x, double 
  // Return in (x,y,z) the coordinates of a point on the plane given by the 2 parameters a,b.
  // 'a' in [0, 2*PI] corresponds to angle theta around the cylinder
  // 'b' in [0, 1] corresponds to height from the bottom
- 
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////   
+ // Canonical cylinder has radius 1 and spans z in [-1, 1], so height 2.
+ struct point3D p = {cos(a), sin(a), -1 + 2 * b, 1};
+ matVecMult(cyl->T, &p);
+ *x = p.px;
+ *y = p.py;
+ *z = p.pz;
 }
 
 void planeSample(struct object3D *plane, double *x, double *y, double *z)
@@ -293,11 +478,7 @@ void planeSample(struct object3D *plane, double *x, double *y, double *z)
  // Returns the 3D coordinates (x,y,z) of a randomly sampled point on the plane
  // Sapling should be uniform, meaning there should be an equal change of gedtting
  // any spot on the plane
-
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////   
-
+ planeCoordinates(plane, rand01(), rand01(), x, y, z);
 }
 
 void sphereSample(struct object3D *sphere, double *x, double *y, double *z)
@@ -306,21 +487,23 @@ void sphereSample(struct object3D *sphere, double *x, double *y, double *z)
  // Sampling should be uniform - note that this is tricky for a sphere, do some
  // research and document in your report what method is used to do this, along
  // with a reference to your source.
- 
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////
-    
+
+ // Picking the latitude b uniformly would bunch points at the poles. Instead pick the height
+ // z = sin(b) uniformly in [-1, 1]: by Archimedes' hat-box theorem, slices of the sphere of equal
+ // height have equal area, so this (with a uniform longitude a) is uniform over the surface.
+ // Reference: Weisstein, "Sphere Point Picking", MathWorld,
+ // https://mathworld.wolfram.com/SpherePointPicking.html
+ double a = 2 * PI * rand01();
+ double b = asin(2 * rand01() - 1);
+ sphereCoordinates(sphere, a, b, x, y, z);
 }
 
 void cylSample(struct object3D *cyl, double *x, double *y, double *z)
 {
  // Returns the 3D coordinates (x,y,z) of a randomly sampled point on the cylinder
  // Sampling should be uniform over the cylinder.
-
- /////////////////////////////////
- // TO DO: Complete this function.
- /////////////////////////////////   
+ // Samples the side wall only (not the caps).
+ cylCoordinates(cyl, 2 * PI * rand01(), rand01(), x, y, z);
 }
 
 //////////////////////////////////
@@ -448,19 +631,75 @@ void texMap(struct image *img, double a, double b, double *R, double *G, double 
   to determine texture colour.
  */
 
- //////////////////////////////////////////////////
- // TO DO:
- //
- //  Complete this function to return the colour
- // of the texture image at the specified texture
- // coordinates. Your code should use bi-linear
- // interpolation to obtain the texture colour.
- //////////////////////////////////////////////////
+ double *rgb = (double *)img->rgbdata;
 
- *(R)=0;	// Returns black - delete this and
- *(G)=0;	// replace with your code to compute
- *(B)=0;	// texture colour at (a,b)
- return;
+ a = fmin(1, fmax(0, a)); // guard against rounding just outside [0,1]
+ b = fmin(1, fmax(0, b));
+
+ double x = a * (img->sx - 1);
+ double y = (1 - b) * (img->sy - 1); // b = 1 (top of object) -> row 0 (top of image)
+
+ int x0 = (int)x, y0 = (int)y;
+ int x1 = (x0 + 1 < img->sx) ? x0 + 1 : x0;
+ int y1 = (y0 + 1 < img->sy) ? y0 + 1 : y0;
+ double fx = x - x0, fy = y - y0;
+
+ const double *p00 = rgb + 3 * (y0 * img->sx + x0); // top-left
+ const double *p10 = rgb + 3 * (y0 * img->sx + x1); // top-right
+ const double *p01 = rgb + 3 * (y1 * img->sx + x0); // bottom-left
+ const double *p11 = rgb + 3 * (y1 * img->sx + x1); // bottom-right
+
+ double out[3];
+ for (int c = 0; c < 3; c++)
+ {
+   double top = (1 - fx) * p00[c] + fx * p10[c];
+   double bottom = (1 - fx) * p01[c] + fx * p11[c];
+   out[c] = (1 - fy) * top + fy * bottom;
+ }
+ *R = out[0];
+ *G = out[1];
+ *B = out[2];
+}
+
+void normMap(struct image *img, double a, double b, struct point3D *n)
+{
+  // Only guaranteed for our basic shapes: it assumes up x n and n x t give the image's right and up directions on the surface, and the fallback used when n is parallel to up may not suit other shapes.
+  double x_coef, y_coef, n_coef;
+  sampleNormalMap(img, a, b, &x_coef, &y_coef, &n_coef);
+
+  struct point3D up = {0, 0, 1, 1};
+  struct point3D *t = cross(&up, n);
+  if (t->px * t->px + t->py * t->py + t->pz * t->pz < EPSILON * EPSILON)
+  {
+    t->px = 1; // n is parallel to up, so use the x axis (the plane's right direction)
+    t->py = 0;
+    t->pz = 0;
+  }
+  normalize(t);
+  struct point3D *bt = cross(n, t);
+
+  scaleVector(x_coef, t);
+  scaleVector(y_coef, bt);
+  scaleVector(n_coef, n);
+
+  addVectors(t, n);
+  addVectors(bt, n);
+  normalize(n);
+
+  free(t);
+  free(bt);
+}
+
+void sampleNormalMap(struct image *img, double a, double b, double *x_coef, double *y_coef, double *n_coef)
+{
+  // Returns the tangent-space normal stored in a normal map at texture coordinates (a,b), bilinearly
+  // interpolated. Each channel is decoded from [0,1] to [-1,1], giving the coefficients of the
+  // perturbed normal in the surface's local basis: n = x_coef*T + y_coef*Bt + n_coef*N.
+  // The result is not unit length (interpolation shortens it), so normalize the final normal.
+  texMap(img, a, b, x_coef, y_coef, n_coef);
+  *x_coef = 2 * *x_coef - 1; // Coefficient for the tangent T: the surface direction in which a increases (left to right in the image)
+  *y_coef = 2 * *y_coef - 1; // Coefficient for the bitangent Bt: the surface direction in which b increases (towards the top of the image)
+  *n_coef = 2 * *n_coef - 1; // Coefficient for the geometric normal N
 }
 
 void alphaMap(struct image *img, double a, double b, double *alpha)
@@ -469,17 +708,27 @@ void alphaMap(struct image *img, double a, double b, double *alpha)
  // notice that alpha maps are single layer grayscale images, hence
  // the separate function.
 
- //////////////////////////////////////////////////
- // TO DO:
- //
- //  Complete this function to return the alpha
- // value from the image at the specified texture
- // coordinates. Your code should use bi-linear
- // interpolation to obtain the texture colour.
- //////////////////////////////////////////////////
- 
- *(alpha)=1;	// Returns 1 which means fully opaque. Replace
- return;	// with your code if implementing alpha maps.
+ double *alphas = (double *)img->rgbdata;
+
+ a = fmin(1, fmax(0, a)); // guard against rounding just outside [0,1]
+ b = fmin(1, fmax(0, b));
+
+ double x = a * (img->sx - 1);
+ double y = (1 - b) * (img->sy - 1); // b = 1 (top of object) -> row 0 (top of image)
+
+ int x0 = (int)x, y0 = (int)y;
+ int x1 = (x0 + 1 < img->sx) ? x0 + 1 : x0;
+ int y1 = (y0 + 1 < img->sy) ? y0 + 1 : y0;
+ double fx = x - x0, fy = y - y0;
+
+ const double *p00 = alphas + (y0 * img->sx + x0); // top-left
+ const double *p10 = alphas + (y0 * img->sx + x1); // top-right
+ const double *p01 = alphas + (y1 * img->sx + x0); // bottom-left
+ const double *p11 = alphas + (y1 * img->sx + x1); // bottom-right
+
+ double top = (1 - fx) * *p00 + fx * *p10;
+ double bottom = (1 - fx) * *p01 + fx * *p11;
+ *alpha = (1 - fy) * top + fy * bottom;
 }
 
 

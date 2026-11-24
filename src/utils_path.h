@@ -56,6 +56,16 @@ inline void matVecMult(double A[4][4], struct point3D *pt)
  memcpy(pt,&pr,4*sizeof(double));
 }
 
+inline void matTranspose(double A[4][4], double At[4][4])
+{
+ // Computes the transpose At=A^T. A and At must not be the same matrix.
+ int i,j;
+
+ for (i=0;i<4;i++)
+  for (j=0;j<4;j++)
+   At[i][j]=A[j][i];
+}
+
 // Matrix manipulation - Mind the fact that these functions will change the matrix T - for hierarchical objects you will
 // need to be careful to make local copies for manipulation where needed.
 void invert(double *T, double *Tinv);
@@ -134,6 +144,16 @@ inline void subVectors(struct point3D *a, struct point3D *b)
  b->py=b->py-a->py;
  b->pz=b->pz-a->pz;
  b->pw=1;               // Mind the homogeneous coordinate!
+}
+
+inline void scaleVector(double s, struct point3D *a)
+{
+ // Performs the scalar multiplication a=s*a. Note the result
+ // is left in a. Only x, y, z are scaled, the w component is
+ // left untouched.
+ a->px=s*a->px;
+ a->py=s*a->py;
+ a->pz=s*a->pz;
 }
 
 inline double length(struct point3D *a)
@@ -221,7 +241,9 @@ void cylIntersect(struct object3D *cylinder, struct ray3D *r, double *lambda, st
 // You will need to add code for these if you implement texture mapping.
 void loadTexture(struct object3D *o, const char *filename, int type, struct textureNode **t_list);
 void texMap(struct image *img, double a, double b, double *R, double *G, double *B);
-void alphaMap(struct image *img, double a, double b, double *R, double *G, double *B);
+void alphaMap(struct image *img, double a, double b, double *alpha);
+void normMap(struct image *img, double a, double b, struct point3D *n);
+void sampleNormalMap(struct image *img, double a, double b, double *x_coef, double *y_coef, double *n_coef);
 
 // Functions to insert objects and lights into their respective lists
 void insertObject(struct object3D *o, struct object3D **list);

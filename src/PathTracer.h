@@ -18,6 +18,7 @@
 
 #define PI 3.14159265354
 #define MAX_D 15
+#define EPSILON 1e-6		// Tolerance for floating point comparisons (parallel rays, self-intersections)
 
 /* The structure below is used to hold a single RGB image. 'rgbdata' points */
 /* to an array of size sx*sy*[num layers] but note that your code must know */

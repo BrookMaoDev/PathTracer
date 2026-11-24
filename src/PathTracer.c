@@ -64,12 +64,28 @@ void findFirstHit(struct ray3D *ray, double *lambda, struct object3D *Os, struct
  //   *n      -  A pointer to a 3D point structure so you can return the normal at the intersection point
  //   *a, *b  -  Pointers toward double variables so you can return the texture coordinates a,b at the intersection point
 
- /////////////////////////////////////////////////////////////
- // TO DO: Implement this function. See the notes for
- // reference of what to do in here
- /////////////////////////////////////////////////////////////
+ // Os is intentionally unused: self-intersections are rejected by the lambda > EPSILON check instead.
+ // Skipping Os entirely would break cases where a ray must hit its source object again (e.g. refraction
+ // exiting a sphere, self-shadowing, or non-convex objects).
+ struct object3D *o;
+ struct point3D tp, tn;
+ double tl, ta, tb;
 
-    
+ *lambda=-1;
+ *obj=NULL;
+ for (o=object_list; o!=NULL; o=o->next)
+ {
+  o->intersect(o,ray,&tl,&tp,&tn,&ta,&tb);
+  if (tl>EPSILON && (*lambda<0 || tl<*lambda))
+  {
+   *lambda=tl;
+   *obj=o;
+   *p=tp;
+   *n=tn;
+   *a=ta;
+   *b=tb;
+  }
+ }
 }
 
 void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct object3D *Os, int CEL)
