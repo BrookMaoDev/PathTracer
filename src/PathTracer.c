@@ -230,8 +230,8 @@ int main(int argc, char *argv[])
   exit(0);
  }
 
- du=cam->wsize/(sx-1);		// du and dv. In the notes in terms of wl and wr, wt and wb,
- dv=-cam->wsize/(sx-1);		// here we use wl, wt, and wsize. du=dv since the image is
+ du=cam->wsize/sx;		// du and dv. In the notes in terms of wl and wr, wt and wb,
+ dv=-cam->wsize/sx;		// here we use wl, wt, and wsize. du=dv since the image is
 				// and dv is negative since y increases downward in pixel
 				// coordinates and upward in camera coordinates.
 
@@ -284,8 +284,8 @@ int main(int argc, char *argv[])
    for (i=0;i<sx;i++)
    {
     // Random sample within the pixel's area
-    pc.px=(cam->wl+((i+(rand01()-.5))*du));
-    pc.py=(cam->wt+((j+(rand01()-.5))*dv));
+    pc.px=(cam->wl+((i+rand01())*du));
+    pc.py=(cam->wt+((j+rand01())*dv));
     pc.pz=cam->f;
     pc.pw=1;
 
