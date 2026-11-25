@@ -180,8 +180,16 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   ray->B/=q;
  }
 
+ // Normals of solid objects point outward, so this tells us whether the ray is entering or leaving
+ int entering=dot(&n,&ray->d)<0;
+
  // Make the normal face the incoming ray
- if (dot(&n,&ray->d)>0) scaleVector(-1,&n);
+ if (!entering) scaleVector(-1,&n);
+
+ // Mirror direction m = d - 2(d.n)n, used by reflection and total internal reflection
+ struct point3D mirror=n;
+ scaleVector(-2*dot(&ray->d,&n),&mirror);
+ addVectors(&ray->d,&mirror);
 
  // Pick this bounce's lobe; each branch sets the new direction d and the throughput factor (R,G,B)
  struct point3D d;
@@ -197,14 +205,11 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
  }
  else if (dice<obj->diffPct+obj->reflPct)
  {
-  // Mirror direction r = d - 2(d.n)n, tilted by a Gaussian angle with sigma refl_sig (Box-Muller)
-  struct point3D r=n;
-  scaleVector(-2*dot(&ray->d,&n),&r);
-  addVectors(&ray->d,&r);
+  // Mirror direction tilted by a Gaussian angle with sigma refl_sig (Box-Muller)
   do
   {
    double tilt=obj->refl_sig*sqrt(-2*log(1-rand01()))*cos(2*PI*rand01());
-   sampleAround(&r,cos(tilt),2*PI*rand01(),&d);
+   sampleAround(&mirror,cos(tilt),2*PI*rand01(),&d);
   } while (dot(&d,&n)<=0);	// Re-sample directions that point into the surface
   R=obj->col.R;
   G=obj->col.G;
@@ -212,11 +217,28 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
  }
  else
  {
-  // Refraction: not implemented yet (part c), so end the path
-  col->R=ray->Ir;
-  col->G=ray->Ig;
-  col->B=ray->Ib;
-  return;
+  // Refraction, assuming everything outside the object being hit is air
+  if (obj->frontAndBack) d=ray->d;	// Thin surface (plane): no volume, so the ray continues straight through
+  else
+  {
+   // Snell's law: d_t = r*b + (r*c - sqrt(1 - r^2(1 - c^2)))*n, with r = n1/n2 and c = -n.b
+   double r=entering ? 1.0/obj->r_index : obj->r_index;
+   double c=-dot(&n,&ray->d);
+   double k=1-r*r*(1-c*c);
+   if (k<0) d=mirror;		// Total internal reflection
+   else
+   {
+    double s=r*c-sqrt(k);
+    d.px=r*ray->d.px+s*n.px;
+    d.py=r*ray->d.py+s*n.py;
+    d.pz=r*ray->d.pz+s*n.pz;
+    d.pw=1;
+    normalize(&d);
+   }
+  }
+  R=obj->col.R;
+  G=obj->col.G;
+  B=obj->col.B;
  }
 
  next_ray=newRay(&p,&d);
