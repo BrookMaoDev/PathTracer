@@ -336,11 +336,16 @@ void sphereIntersect(struct object3D *sphere, struct ray3D *ray, double *lambda,
 
  // Texture coordinates in [0,1] from the spherical angles, using z as the polar axis:
  // theta = atan2(y, x) in (-PI, PI], phi = asin(z) in [-PI/2, PI/2]
- double theta = atan2(p_canonical.py, p_canonical.px);
- if (theta < 0) theta += 2 * PI;
- double phi = asin(fmin(1, fmax(-1, p_canonical.pz)));	// Clamp so rounding can't push asin out of its domain
- *a = theta / (2 * PI);
- *b = (phi + PI / 2) / PI;
+ // Skipped for untextured spheres: atan2/asin are slow and every candidate hit, not just the closest, gets here
+ *a = *b = 0;
+ if (sphere->texImg || sphere->normalMap || sphere->alphaMap)
+ {
+  double theta = atan2(p_canonical.py, p_canonical.px);
+  if (theta < 0) theta += 2 * PI;
+  double phi = asin(fmin(1, fmax(-1, p_canonical.pz)));	// Clamp so rounding can't push asin out of its domain
+  *a = theta / (2 * PI);
+  *b = (phi + PI / 2) / PI;
+ }
 
  ray->rayPos(ray, *lambda, p);
 
@@ -417,10 +422,15 @@ void cylIntersect(struct object3D *cylinder, struct ray3D *r, double *lambda, st
 
  // Texture coordinates in [0,1]: a from the angle around the z axis, b from the height (inverse of cylCoordinates).
  // atan2 rather than acos(x) since acos only covers [0, PI] and can't tell y > 0 from y < 0.
- double theta = atan2(p_canonical.py, p_canonical.px);
- if (theta < 0) theta += 2 * PI;
- *a = theta / (2 * PI);
- *b = (p_canonical.pz + 1) / 2;
+ // Skipped for untextured cylinders, as for spheres
+ *a = *b = 0;
+ if (cylinder->texImg || cylinder->normalMap || cylinder->alphaMap)
+ {
+  double theta = atan2(p_canonical.py, p_canonical.px);
+  if (theta < 0) theta += 2 * PI;
+  *a = theta / (2 * PI);
+  *b = (p_canonical.pz + 1) / 2;
+ }
 
  r->rayPos(r, *lambda, p);
 
