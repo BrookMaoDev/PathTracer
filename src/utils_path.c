@@ -506,6 +506,29 @@ void cylSample(struct object3D *cyl, double *x, double *y, double *z)
  cylCoordinates(cyl, 2 * PI * rand01(), rand01(), x, y, z);
 }
 
+double surfaceArea(struct object3D *obj)
+{
+ // Area of the surface that randomPoint() samples. Exact for planes under any transform. Spheres and
+ // cylinders scale the canonical area by |det|^(2/3): exact for uniform scaling, approximate otherwise.
+ if (obj->intersect==&planeIntersect)
+ {
+  // The canonical plane is a 2x2 square: area = |T*e1 x T*e2| for its edge vectors (w=0 ignores translation)
+  struct point3D e1={2,0,0,0}, e2={0,2,0,0};
+  matVecMult(obj->T,&e1);
+  matVecMult(obj->T,&e2);
+  struct point3D *c=cross(&e1,&e2);
+  double A=length(c);
+  free(c);
+  return A;
+ }
+ double (*T)[4]=obj->T;
+ double det=T[0][0]*(T[1][1]*T[2][2]-T[1][2]*T[2][1])
+           -T[0][1]*(T[1][0]*T[2][2]-T[1][2]*T[2][0])
+           +T[0][2]*(T[1][0]*T[2][1]-T[1][1]*T[2][0]);
+ // Canonical sphere area is 4*PI; canonical cylinder side wall (radius 1, height 2, what cylSample covers) is also 4*PI
+ return 4*PI*pow(fabs(det),2.0/3.0);
+}
+
 //////////////////////////////////
 // Importance sampling for BRDF
 //////////////////////////////////

@@ -46,6 +46,9 @@ struct textureNode *texture_list;
 unsigned long int NUM_RAYS;
 int MAX_DEPTH;
 #define RR_START_DEPTH 3		// Russian roulette applies from this depth on (camera ray is depth 1)
+struct object3D **light_list;		// Pointers to the light sources in object_list
+double *light_area;			// Surface area of each light in light_list
+int num_lights;
 
 #include "buildScene.c"			// Import scene definition
 
@@ -193,6 +196,7 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
 
  // Pick this bounce's lobe; each branch sets the new direction d and the throughput factor (R,G,B)
  struct point3D d;
+ int nextCEL=1;			// Whether the next ray counts light it hits directly (see explicit light sampling)
  dice=rand01();
  if (dice<obj->diffPct)
  {
@@ -227,6 +231,46 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   R=obj->col.R*2*costheta;
   G=obj->col.G*2*costheta;
   B=obj->col.B*2*costheta;
+#endif
+
+#ifdef __USE_ES
+  // Explicit light sampling: one shadow ray to a random point on a randomly chosen light
+  if (num_lights>0)
+  {
+   int li=(int)(rand01()*num_lights);
+   struct object3D *ls=light_list[li];
+   struct point3D l;
+   ls->randomPoint(ls,&l.px,&l.py,&l.pz);
+   l.pw=1;
+   subVectors(&p,&l);		// l = light point - p, unnormalized so the sampled point is at lambda = 1
+   double ndotl=dot(&n,&l);
+   if (ndotl>0)			// Light is in front of the surface
+   {
+    struct ray3D *shadow=newRay(&p,&l);
+    struct object3D *s_obj;
+    struct point3D s_p,s_n;
+    double s_lambda,s_a,s_b;
+    findFirstHit(shadow,&s_lambda,obj,&s_obj,&s_p,&s_n,&s_a,&s_b);
+    free(shadow);
+    if (s_obj==ls && fabs(1-s_lambda)<EPSILON)	// Unblocked: the first hit is the sampled point on the light
+    {
+     double dist2=dot(&l,&l);
+     double cos_p=ndotl/sqrt(dist2);
+     double cos_ls=-dot(&s_n,&l)/sqrt(dist2);
+     if (cos_ls>0)
+     {
+      // Notes' weight w = min(1, A (n.l)(n_ls.-l) / d^2), divided by PI because the diffuse BRDF is col/PI
+      // (the bounce path's cosine-weighted pdf cancels that PI, so without it ES would be PI times too bright),
+      // then times num_lights for the 1/num_lights light choice
+      double w=fmin(1,light_area[li]*cos_p*cos_ls/(PI*dist2))*num_lights;
+      ray->Ir+=ray->R*obj->col.R*ls->col.R*w;
+      ray->Ig+=ray->G*obj->col.G*ls->col.G*w;
+      ray->Ib+=ray->B*obj->col.B*ls->col.B*w;
+     }
+    }
+   }
+  }
+  nextCEL=0;			// The shadow ray already accounted for direct light at this point
 #endif
  }
  else if (dice<obj->diffPct+obj->reflPct)
@@ -274,7 +318,7 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
  next_ray->Ir=ray->Ir;
  next_ray->Ig=ray->Ig;
  next_ray->Ib=ray->Ib;
- PathTrace(next_ray,depth+1,col,obj,1);
+ PathTrace(next_ray,depth+1,col,obj,nextCEL);
  free(next_ray);
 }
 
@@ -416,6 +460,20 @@ int main(int argc, char *argv[])
  }
  fprintf(stderr,"\n");
 
+ // Collect the light sources for explicit light sampling
+ num_lights=0;
+ for (obj=object_list; obj!=NULL; obj=obj->next) if (obj->isLightSource) num_lights++;
+ light_list=(struct object3D **)calloc(num_lights,sizeof(struct object3D *));
+ light_area=(double *)calloc(num_lights,sizeof(double));
+ k=0;
+ for (obj=object_list; obj!=NULL; obj=obj->next)
+  if (obj->isLightSource)
+  {
+   light_list[k]=obj;
+   light_area[k]=surfaceArea(obj);
+   k++;
+  }
+
  NUM_RAYS=0;
 
  t1=time(NULL);
@@ -487,6 +545,8 @@ int main(int argc, char *argv[])
  deleteImage(im);					// Rendered image
  free(cam);						// camera view
  free(wght);
+ free(light_list);
+ free(light_area);
  exit(0);
 }
 

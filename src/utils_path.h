@@ -223,6 +223,7 @@ void cylCoordinates(struct object3D *cyl, double a, double b, double *x, double 
 void planeSample(struct object3D *plane, double *x, double *y, double *z);
 void sphereSample(struct object3D *sphere, double *x, double *y, double *z);
 void cylSample(struct object3D *cyl, double *x, double *y, double *z);
+double surfaceArea(struct object3D *obj);
 
 // Per-thread random numbers: call seedThreadRNG() once in each thread before that thread uses rand01()
 void seedThreadRNG(int tid);
