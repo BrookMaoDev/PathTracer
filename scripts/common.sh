@@ -5,6 +5,7 @@
 set -e
 cd "$(dirname "$0")/.."	# Repo root
 mkdir -p bin renderings
+export OMP_WAIT_POLICY=passive	# Idle threads sleep at the per-pass barrier instead of spinning (~10% faster here)
 
 build() {
   name=$1
