@@ -196,12 +196,38 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
  dice=rand01();
  if (dice<obj->diffPct)
  {
+#ifdef __USE_IS
+  // Cosine-weighted (importance) sampling.
+  //
+  // Light arriving along d contributes in proportion to cos(theta) = n.d, so we want directions with a
+  // larger cos(theta) to be chosen more often. Let X = cos(theta). X is in [0,1] because n was flipped to
+  // face the incoming ray and we only sample the hemisphere around it. (Equal ranges of cos(theta) cover
+  // equal areas of the hemisphere, which is why the uniform sampler below can just use X = U.)
+  //
+  // Density proportional to x: f_X(x) = c*x on [0,1]. It must integrate to 1:
+  //   integral from 0 to 1 of c*x dx = c/2 = 1, so c = 2 and f_X(x) = 2x.
+  // CDF: F_X(x) = integral from 0 to x of 2t dt = x^2.
+  // rand01() only gives U ~ Uniform(0,1), so we want a function h such that h(U) ~ X.
+  // Inverse transform: h = F_X^-1 works, since
+  //   P(F_X^-1(U) <= x) = P(U <= F_X(x)) = F_X(x). Solving u = x^2 gives h(u) = sqrt(u).
+  //
+  // Weight: under uniform sampling X has density 1; now it has density f_X(x) = 2x. So the uniform weight
+  // col*2cos(theta) is divided by f_X evaluated at the sampled value, f_X(cos(theta)) = 2cos(theta),
+  // leaving col. Bright directions are sampled more often but each counts for less, so the expected
+  // value is unchanged.
+  double costheta=sqrt(rand01());
+  sampleAround(&n,costheta,2*PI*rand01(),&d);
+  R=obj->col.R;
+  G=obj->col.G;
+  B=obj->col.B;
+#else
   // Uniform hemisphere sample around n
   double costheta=rand01();
   sampleAround(&n,costheta,2*PI*rand01(),&d);
   R=obj->col.R*2*costheta;
   G=obj->col.G*2*costheta;
   B=obj->col.B*2*costheta;
+#endif
  }
  else if (dice<obj->diffPct+obj->reflPct)
  {
