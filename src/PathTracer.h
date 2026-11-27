@@ -84,6 +84,19 @@ struct colourRGB{
 };
 
 /*
+   A BRDF (material) that an object can use in place of the default Lambertian diffuse lobe. All directions
+   are unit vectors pointing away from the surface: v toward where the ray came from, n on v's side.
+*/
+struct object3D;
+struct BRDF{
+	// Samples a direction d to continue the path; returns in (R,G,B) the throughput weight f*cos/pdf
+	// (0,0,0 if the sample is invalid, e.g. below the surface)
+	void (*sample)(struct object3D *obj, struct point3D *n, struct point3D *v, struct point3D *d, double *R, double *G, double *B);
+	// Returns in (R,G,B) the BRDF value f(v,wi) for light arriving from direction wi (used by explicit light sampling)
+	void (*eval)(struct object3D *obj, struct point3D *n, struct point3D *v, struct point3D *wi, double *R, double *G, double *B);
+};
+
+/*
    The structure below defines an Object within the World Coordinate Frame.
    For this ray tracer, we will use a simple linked list of objects (not
    a tree structure, so hierarchical transformations have to be fully
@@ -136,6 +149,8 @@ struct object3D{
 	double refl_sig;		// For reflective component, controls the amount of spread
 	double r_index;			// Index of refraction (at the 587.6 nm reference wavelength if dispersive)
 	double dispersion;		// Cauchy B coefficient in um^2 (e.g. 0.0042 for crown glass); 0 = not dispersive
+	struct BRDF *brdf;		// Replaces the Lambertian diffuse lobe if not NULL (e.g. &GGX)
+	double roughness;		// BRDF roughness alpha (GGX: ~0.01 polished to ~0.5 very rough)
 	
 	int    isLightSource;		// Flag to indicate if this is an area light source
 	double LSweight;		// If this is an area light source, keeps track of its weight (volume)

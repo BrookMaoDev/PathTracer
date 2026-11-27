@@ -589,6 +589,102 @@ void wavelengthToRGB(double nm, double *R, double *G, double *B)
  *B*=spectrum_norm[2];
 }
 
+void sampleAround(struct point3D *axis, double costheta, double phi, struct point3D *d)
+{
+ // Returns in d the unit direction at angle acos(costheta) from the unit vector axis, rotated by phi around it
+ struct point3D helper={1,0,0,1};
+ if (fabs(axis->px)>.9)		// helper must not be parallel to axis
+ {
+  helper.px=0;
+  helper.py=1;
+ }
+ struct point3D *u=cross(axis,&helper);
+ normalize(u);
+ struct point3D *v=cross(axis,u);
+
+ double sintheta=sqrt(1-costheta*costheta);
+ d->px=costheta*axis->px+sintheta*(cos(phi)*u->px+sin(phi)*v->px);
+ d->py=costheta*axis->py+sintheta*(cos(phi)*u->py+sin(phi)*v->py);
+ d->pz=costheta*axis->pz+sintheta*(cos(phi)*u->pz+sin(phi)*v->pz);
+ d->pw=1;
+ free(u);
+ free(v);
+}
+
+//////////////////////////////////
+// GGX microfacet metal BRDF
+//////////////////////////////////
+// The surface is modelled as tiny mirror facets whose normals m are spread around n by the GGX distribution
+// with roughness alpha (Walter et al. 2007, "Microfacet Models for Refraction through Rough Surfaces").
+// Cook-Torrance BRDF, with h = normalize(v + wi) the facet normal that reflects v into wi:
+//   f(v,wi) = D(h) G(v,wi) F(v.h) / (4 (n.v)(n.wi))
+//   D(h)  = alpha^2 / (PI ((n.h)^2 (alpha^2-1) + 1)^2)                   GGX facet normal distribution
+//   G     = G1(v) G1(wi), G1(x) = 2(n.x) / ((n.x) + sqrt(alpha^2 + (1-alpha^2)(n.x)^2))   Smith shadowing
+//   F     = F0 + (1-F0)(1-v.h)^5                                         Schlick Fresnel, F0 = obj->col
+
+static double ggxG1(double a2, double nx)
+{
+ return 2*nx/(nx+sqrt(a2+(1-a2)*nx*nx));
+}
+
+static double ggxAlpha2(struct object3D *obj)
+{
+ double a=fmax(obj->roughness,1e-3);	// alpha = 0 is a perfect mirror, where D is infinite
+ return a*a;
+}
+
+void ggxSample(struct object3D *obj, struct point3D *n, struct point3D *v, struct point3D *d, double *R, double *G, double *B)
+{
+ // Sample the facet normal h with density D(h)(n.h) over the hemisphere. With phi uniform, inverting the
+ // CDF of theta_h gives cos(theta_h) = sqrt((1-u) / (1 + (alpha^2-1) u)). Then reflect v about h.
+ // The pdf of the reflected direction is D(h)(n.h) / (4 v.h), so the weight f*(n.d)/pdf simplifies to
+ //   F G (v.h) / ((n.v)(n.h))     (D cancels)
+ double a2=ggxAlpha2(obj);
+ double u=rand01();
+ double nh=sqrt((1-u)/(1+(a2-1)*u));
+ struct point3D h;
+ sampleAround(n,nh,2*PI*rand01(),&h);
+ double vh=dot(v,&h);
+ d->px=2*vh*h.px-v->px;		// d = reflection of v about h = 2(v.h)h - v
+ d->py=2*vh*h.py-v->py;
+ d->pz=2*vh*h.pz-v->pz;
+ d->pw=1;
+ double nv=dot(n,v), nd=dot(n,d);
+ if (vh<=0 || nd<=0 || nv<=0)	// Reflected below the surface: this facet sample carries no light
+ {
+  *R=*G=*B=0;
+  return;
+ }
+ double w=ggxG1(a2,nv)*ggxG1(a2,nd)*vh/(nv*nh);
+ double s=pow(1-vh,5);
+ *R=(obj->col.R+(1-obj->col.R)*s)*w;
+ *G=(obj->col.G+(1-obj->col.G)*s)*w;
+ *B=(obj->col.B+(1-obj->col.B)*s)*w;
+}
+
+void ggxEval(struct object3D *obj, struct point3D *n, struct point3D *v, struct point3D *wi, double *R, double *G, double *B)
+{
+ double nv=dot(n,v), nl=dot(n,wi);
+ if (nv<=0 || nl<=0)
+ {
+  *R=*G=*B=0;
+  return;
+ }
+ struct point3D h={v->px+wi->px, v->py+wi->py, v->pz+wi->pz, 1};
+ normalize(&h);
+ double a2=ggxAlpha2(obj);
+ double nh=dot(n,&h), vh=dot(v,&h);
+ double t=nh*nh*(a2-1)+1;
+ double D=a2/(PI*t*t);
+ double k=D*ggxG1(a2,nv)*ggxG1(a2,nl)/(4*nv*nl);
+ double s=pow(1-vh,5);
+ *R=(obj->col.R+(1-obj->col.R)*s)*k;
+ *G=(obj->col.G+(1-obj->col.G)*s)*k;
+ *B=(obj->col.B+(1-obj->col.B)*s)*k;
+}
+
+struct BRDF GGX={&ggxSample,&ggxEval};
+
 //////////////////////////////////
 // Importance sampling for BRDF
 //////////////////////////////////

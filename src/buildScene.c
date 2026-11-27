@@ -76,6 +76,16 @@ void buildScene(void)
  Scale(o,3.75,3.75,3.75);
  Translate(o,4,-3.75,6.5);
  invert(&o->T[0][0],&o->Tinv[0][0]);
+#ifdef __DEMO_GGX
+ // GGX gold instead of the mirror (F0 for gold ~ (1.0, 0.71, 0.29))
+ o->diffPct=1;
+ o->reflPct=0;
+ o->col.R=1.0;
+ o->col.G=0.71;
+ o->col.B=0.29;
+ o->brdf=&GGX;
+ o->roughness=GGX_DEMO_ROUGHNESS;
+#endif
  insertObject(o,&object_list);
 
 /*

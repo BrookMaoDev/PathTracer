@@ -41,6 +41,9 @@
 //#define __USE_DOF			// Use depth of field (thin lens camera)
 //#define __USE_DISPERSION		// Use spectral dispersion for refracting objects with dispersion > 0
 
+#ifndef GGX_DEMO_ROUGHNESS
+#define GGX_DEMO_ROUGHNESS 0.3		// Roughness of the demo scene's GGX gold sphere
+#endif
 #ifndef DISPERSION_B
 #define DISPERSION_B 0.05		// Cauchy B used for the demo scene's glass sphere
 #endif
@@ -63,6 +66,7 @@ struct object3D *object_list;
 struct textureNode *texture_list;
 unsigned long int NUM_RAYS;
 int MAX_DEPTH;
+#define ES_MIN_ROUGHNESS 0.2		// BRDF objects smoother than this skip explicit light sampling (bounce sampling is better)
 #define RR_START_DEPTH 3		// Russian roulette applies from this depth on (camera ray is depth 1)
 struct object3D **light_list;		// Pointers to the light sources in object_list
 double *light_area;			// Surface area of each light in light_list
@@ -108,28 +112,6 @@ void findFirstHit(struct ray3D *ray, double *lambda, struct object3D *Os, struct
    *b=tb;
   }
  }
-}
-
-void sampleAround(struct point3D *axis, double costheta, double phi, struct point3D *d)
-{
- // Returns in d the unit direction at angle acos(costheta) from the unit vector axis, rotated by phi around it
- struct point3D helper={1,0,0,1};
- if (fabs(axis->px)>.9)		// helper must not be parallel to axis
- {
-  helper.px=0;
-  helper.py=1;
- }
- struct point3D *u=cross(axis,&helper);
- normalize(u);
- struct point3D *v=cross(axis,u);
-
- double sintheta=sqrt(1-costheta*costheta);
- d->px=costheta*axis->px+sintheta*(cos(phi)*u->px+sin(phi)*v->px);
- d->py=costheta*axis->py+sintheta*(cos(phi)*u->py+sin(phi)*v->py);
- d->pz=costheta*axis->pz+sintheta*(cos(phi)*u->pz+sin(phi)*v->pz);
- d->pw=1;
- free(u);
- free(v);
 }
 
 #ifdef __USE_DOF
@@ -240,7 +222,12 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
  struct point3D d;
  int nextCEL=1;			// Whether the next ray counts light it hits directly (see explicit light sampling)
  dice=rand01();
- if (dice<obj->diffPct)
+ if (dice<obj->diffPct && obj->brdf)
+ {
+  struct point3D v={-ray->d.px,-ray->d.py,-ray->d.pz,1};
+  obj->brdf->sample(obj,&n,&v,&d,&R,&G,&B);
+ }
+ else if (dice<obj->diffPct)
  {
 #ifdef __USE_IS
   // Cosine-weighted (importance) sampling.
@@ -274,9 +261,13 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   G=obj->col.G*2*costheta;
   B=obj->col.B*2*costheta;
 #endif
+ }
 
 #ifdef __USE_ES
-  // Explicit light sampling: one shadow ray to a random point on a randomly chosen light
+ // Explicit light sampling for the diffuse lobe (Lambertian, or a BRDF rough enough that light sampling beats
+ // bounce sampling): one shadow ray to a random point on a randomly chosen light
+ if (dice<obj->diffPct && (obj->brdf==NULL || obj->roughness>=ES_MIN_ROUGHNESS))
+ {
   if (num_lights>0)
   {
    int li=(int)(rand01()*num_lights);
@@ -301,20 +292,37 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
      double cos_ls=-dot(&s_n,&l)/sqrt(dist2);
      if (cos_ls>0)
      {
-      // Notes' weight w = min(1, A (n.l)(n_ls.-l) / d^2), divided by PI because the diffuse BRDF is col/PI
-      // (the bounce path's cosine-weighted pdf cancels that PI, so without it ES would be PI times too bright),
-      // then times num_lights for the 1/num_lights light choice
-      double w=fmin(1,light_area[li]*cos_p*cos_ls/(PI*dist2))*num_lights;
-      ray->Ir+=ray->R*obj->col.R*ls->col.R*w;
-      ray->Ig+=ray->G*obj->col.G*ls->col.G*w;
-      ray->Ib+=ray->B*obj->col.B*ls->col.B*w;
+      // Contribution = f * Le * A (n.l)(n_ls.-l) / d^2, times num_lights for the 1/num_lights light choice.
+      // f is the BRDF value: col/PI for Lambertian (the notes' formula omits that PI, which made ES PI times
+      // too bright). The notes' min(1,.) firefly clamp on the Lambertian term becomes min(PI,.) on the
+      // geometric term, which is identical for Lambertian surfaces.
+      double fR,fG,fB;
+      if (obj->brdf)
+      {
+       struct point3D v={-ray->d.px,-ray->d.py,-ray->d.pz,1};
+       struct point3D wi=l;
+       normalize(&wi);
+       obj->brdf->eval(obj,&n,&v,&wi,&fR,&fG,&fB);
+      }
+      else
+      {
+       fR=obj->col.R/PI;
+       fG=obj->col.G/PI;
+       fB=obj->col.B/PI;
+      }
+      double w=fmin(PI,light_area[li]*cos_p*cos_ls/dist2)*num_lights;
+      ray->Ir+=ray->R*fR*ls->col.R*w;
+      ray->Ig+=ray->G*fG*ls->col.G*w;
+      ray->Ib+=ray->B*fB*ls->col.B*w;
      }
     }
    }
   }
   nextCEL=0;			// The shadow ray already accounted for direct light at this point
-#endif
  }
+#endif
+
+ if (dice<obj->diffPct) {}	// Diffuse lobe handled above
  else if (dice<obj->diffPct+obj->reflPct)
  {
   // Mirror direction tilted by a Gaussian angle with sigma refl_sig (Box-Muller)
@@ -371,6 +379,14 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   R=obj->col.R;
   G=obj->col.G;
   B=obj->col.B;
+ }
+
+ if (R==0 && G==0 && B==0)	// Invalid BRDF sample: the path ends here
+ {
+  col->R=ray->Ir;
+  col->G=ray->Ig;
+  col->B=ray->Ib;
+  return;
  }
 
  next_ray=newRay(&p,&d);

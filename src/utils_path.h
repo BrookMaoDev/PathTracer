@@ -225,6 +225,10 @@ void sphereSample(struct object3D *sphere, double *x, double *y, double *z);
 void cylSample(struct object3D *cyl, double *x, double *y, double *z);
 double surfaceArea(struct object3D *obj);
 void initSpectrum(void);
+void sampleAround(struct point3D *axis, double costheta, double phi, struct point3D *d);
+void ggxSample(struct object3D *obj, struct point3D *n, struct point3D *v, struct point3D *d, double *R, double *G, double *B);
+void ggxEval(struct object3D *obj, struct point3D *n, struct point3D *v, struct point3D *wi, double *R, double *G, double *B);
+extern struct BRDF GGX;
 void wavelengthToRGB(double nm, double *R, double *G, double *B);
 
 // Per-thread random numbers: call seedThreadRNG() once in each thread before that thread uses rand01()
