@@ -38,6 +38,19 @@
 //#define __USE_IS			// Use importance sampling for diffuse materials
 //#define __USE_ES			// Use explicit light sampling
 //#define __DEBUG			// <-- Use this to turn on/off debugging output
+//#define __USE_DOF			// Use depth of field (thin lens camera)
+
+#ifdef __USE_DOF
+#ifndef DOF_APERTURE
+#define DOF_APERTURE 0.5		// Lens radius: larger blurs everything off the focal plane more (0 = pinhole, all sharp)
+#endif
+#ifndef DOF_FOCUS
+#define DOF_FOCUS 19.5			// Distance from the camera to the plane in focus
+#endif
+#ifndef DOF_BLADES
+#define DOF_BLADES 0			// Aperture shape (bokeh): 0 = circle, N >= 3 = regular N-sided polygon
+#endif
+#endif
 
 // A couple of global structures and data: An object list, a light list, and the
 // maximum recursion depth
@@ -113,6 +126,30 @@ void sampleAround(struct point3D *axis, double costheta, double phi, struct poin
  free(u);
  free(v);
 }
+
+#ifdef __USE_DOF
+void sampleAperture(double *x, double *y)
+{
+ // Uniform random point on the lens aperture, in lens coordinates (multiples of the u and v camera axes)
+#if DOF_BLADES<3
+ // Disc: the radius needs density proportional to r (ring area grows with r), i.e. f(r) = 2r on [0,1].
+ // Same inverse transform as importance sampling: CDF r^2, so r = sqrt(U).
+ double r=DOF_APERTURE*sqrt(rand01());
+ double phi=2*PI*rand01();
+ *x=r*cos(phi);
+ *y=r*sin(phi);
+#else
+ // Regular polygon: split into DOF_BLADES equal-area triangles (centre, corner k, corner k+1), pick one
+ // uniformly, then a uniform point in it. Distance from the centre also needs density 2s on [0,1], so
+ // s = sqrt(U) scales the point along the triangle, and t picks where along the outer edge.
+ int k=(int)(rand01()*DOF_BLADES);
+ double a0=2*PI*k/DOF_BLADES, a1=2*PI*(k+1)/DOF_BLADES;
+ double s=sqrt(rand01()), t=rand01();
+ *x=DOF_APERTURE*s*((1-t)*cos(a0)+t*cos(a1));
+ *y=DOF_APERTURE*s*((1-t)*sin(a0)+t*sin(a1));
+#endif
+}
+#endif
 
 void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct object3D *Os, int CEL)
 {
@@ -507,6 +544,25 @@ int main(int argc, char *argv[])
     memcpy(&d,&pc,sizeof(struct point3D));
     subVectors(&cam->e,&d);		// Direction is d=pc-e
     normalize(&d);
+
+#ifdef __USE_DOF
+    {
+     // Thin lens: every sample for this pixel passes through the point where the pinhole ray meets the
+     // focal plane (perpendicular to the gaze -w), so surfaces at that depth stay sharp. Dividing by d.gaze
+     // makes the in-focus surface a plane rather than a sphere around the camera.
+     double t=DOF_FOCUS/(-dot(&d,&cam->w));
+     struct point3D fp={cam->e.px+t*d.px, cam->e.py+t*d.py, cam->e.pz+t*d.pz, 1};
+     double lx,ly;
+     sampleAperture(&lx,&ly);
+     pc.px=cam->e.px+lx*cam->u.px+ly*cam->v.px;	// Ray now starts at a random point on the lens
+     pc.py=cam->e.py+lx*cam->u.py+ly*cam->v.py;
+     pc.pz=cam->e.pz+lx*cam->u.pz+ly*cam->v.pz;
+     pc.pw=1;
+     d=fp;
+     subVectors(&pc,&d);
+     normalize(&d);
+    }
+#endif
 
     // Create a ray and do the raytracing for this pixel.
     ray=newRay(&pc,&d);
