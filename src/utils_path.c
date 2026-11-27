@@ -540,6 +540,56 @@ double surfaceArea(struct object3D *obj)
 }
 
 //////////////////////////////////
+// Spectrum (dispersion)
+//////////////////////////////////
+static double spectrum_norm[3]={1,1,1};
+
+static void wavelengthToRGBRaw(double nm, double *R, double *G, double *B)
+{
+ // Approximate colour of a single wavelength (Dan Bruton, "Approximate RGB values for visible wavelengths"):
+ // piecewise-linear hue ramps, dimmed toward the ends of the visible range where the eye is less sensitive
+ double r=0,g=0,b=0,f;
+ if (nm<440)      { r=(440-nm)/(440-380); b=1; }
+ else if (nm<490) { g=(nm-440)/(490-440); b=1; }
+ else if (nm<510) { g=1; b=(510-nm)/(510-490); }
+ else if (nm<580) { r=(nm-510)/(580-510); g=1; }
+ else if (nm<645) { r=1; g=(645-nm)/(645-580); }
+ else             { r=1; }
+ if (nm<420) f=.3+.7*(nm-380)/(420-380);
+ else if (nm>700) f=.3+.7*(780-nm)/(780-700);
+ else f=1;
+ *R=r*f;
+ *G=g*f;
+ *B=b*f;
+}
+
+void initSpectrum(void)
+{
+ // Scale each channel so that, averaged over wavelengths drawn uniformly from the spectrum, the colour is
+ // exactly white (1,1,1). A path that picks a random wavelength is then unbiased: on average it carries
+ // the same light as one that never split.
+ double sum[3]={0,0,0},r,g,b;
+ int i,n=10000;
+ for (i=0;i<n;i++)
+ {
+  wavelengthToRGBRaw(SPECTRUM_MIN_NM+(SPECTRUM_MAX_NM-SPECTRUM_MIN_NM)*(i+.5)/n,&r,&g,&b);
+  sum[0]+=r;
+  sum[1]+=g;
+  sum[2]+=b;
+ }
+ for (i=0;i<3;i++) spectrum_norm[i]=n/sum[i];
+}
+
+void wavelengthToRGB(double nm, double *R, double *G, double *B)
+{
+ // White-balanced colour weight of a wavelength (call initSpectrum() once first)
+ wavelengthToRGBRaw(nm,R,G,B);
+ *R*=spectrum_norm[0];
+ *G*=spectrum_norm[1];
+ *B*=spectrum_norm[2];
+}
+
+//////////////////////////////////
 // Importance sampling for BRDF
 //////////////////////////////////
 void cosWeightedSample(struct point3D *n, struct point3D *d)

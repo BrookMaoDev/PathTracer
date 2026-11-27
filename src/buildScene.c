@@ -67,6 +67,9 @@ void buildScene(void)
  Scale(o,3.75,3.75,3.75);
  Translate(o,-5,-4.0,4.5);
  invert(&o->T[0][0],&o->Tinv[0][0]);
+#ifdef __USE_DISPERSION
+ o->dispersion=DISPERSION_B;		// Exaggerated (real crown glass is ~0.0042) so the rainbow is easy to see
+#endif
  insertObject(o,&object_list);
 
  o=newSphere(0.0,1.0,0.0,.99,.99,.99,.05,2.47);		// Reflect

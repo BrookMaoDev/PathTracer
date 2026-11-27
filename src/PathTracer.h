@@ -18,6 +18,8 @@
 
 #define PI 3.14159265354
 #define MAX_D 15
+#define SPECTRUM_MIN_NM 380.0		// Visible range that dispersive paths sample wavelengths from (nm)
+#define SPECTRUM_MAX_NM 720.0
 #define EPSILON 1e-6		// Tolerance for floating point comparisons (parallel rays, self-intersections)
 
 /* The structure below is used to hold a single RGB image. 'rgbdata' points */
@@ -65,6 +67,7 @@ struct ray3D{
 	double Ir,Ig,Ib;		// Accumulators of brightness for explicit
 					// light sampling
 	struct point3D srcN;		// Source normal - needed for diffuse illumination
+	double wavelength;		// Wavelength in nm carried by this path (dispersion); 0 until it hits a dispersive object
 	/* You may add data here to keep track of any values associated */
 	/* with this ray when implementing advanced raytracing features */
 
@@ -131,7 +134,8 @@ struct object3D{
 					// NOTE: diffPct+reflPct+tranPct=1.0
 	
 	double refl_sig;		// For reflective component, controls the amount of spread
-	double r_index;			// Index of refraction
+	double r_index;			// Index of refraction (at the 587.6 nm reference wavelength if dispersive)
+	double dispersion;		// Cauchy B coefficient in um^2 (e.g. 0.0042 for crown glass); 0 = not dispersive
 	
 	int    isLightSource;		// Flag to indicate if this is an area light source
 	double LSweight;		// If this is an area light source, keeps track of its weight (volume)

@@ -39,6 +39,11 @@
 //#define __USE_ES			// Use explicit light sampling
 //#define __DEBUG			// <-- Use this to turn on/off debugging output
 //#define __USE_DOF			// Use depth of field (thin lens camera)
+//#define __USE_DISPERSION		// Use spectral dispersion for refracting objects with dispersion > 0
+
+#ifndef DISPERSION_B
+#define DISPERSION_B 0.05		// Cauchy B used for the demo scene's glass sphere
+#endif
 
 #ifdef __USE_DOF
 #ifndef DOF_APERTURE
@@ -329,7 +334,27 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   else
   {
    // Snell's law: d_t = r*b + (r*c - sqrt(1 - r^2(1 - c^2)))*n, with r = n1/n2 and c = -n.b
-   double r=entering ? 1.0/obj->r_index : obj->r_index;
+   double n_obj=obj->r_index;
+#ifdef __USE_DISPERSION
+   if (obj->dispersion>0)
+   {
+    // The first dispersive hit picks this path's wavelength uniformly over the visible spectrum and tints
+    // the throughput with its (white-balanced) colour; later hits on the path reuse the same wavelength
+    if (ray->wavelength==0)
+    {
+     double wR,wG,wB;
+     ray->wavelength=SPECTRUM_MIN_NM+(SPECTRUM_MAX_NM-SPECTRUM_MIN_NM)*rand01();
+     wavelengthToRGB(ray->wavelength,&wR,&wG,&wB);
+     ray->R*=wR;
+     ray->G*=wG;
+     ray->B*=wB;
+    }
+    // Cauchy's equation n = A + B/lambda^2, anchored so that n = r_index at 587.6 nm (lambda in um)
+    double l_um=ray->wavelength/1000;
+    n_obj+=obj->dispersion*(1/(l_um*l_um)-1/(.5876*.5876));
+   }
+#endif
+   double r=entering ? 1.0/n_obj : n_obj;
    double c=-dot(&n,&ray->d);
    double k=1-r*r*(1-c*c);
    if (k<0) d=mirror;		// Total internal reflection
@@ -355,6 +380,7 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
  next_ray->Ir=ray->Ir;
  next_ray->Ig=ray->Ig;
  next_ray->Ib=ray->Ib;
+ next_ray->wavelength=ray->wavelength;
  PathTrace(next_ray,depth+1,col,obj,nextCEL);
  free(next_ray);
 }
@@ -496,6 +522,8 @@ int main(int argc, char *argv[])
   obj=obj->next;
  }
  fprintf(stderr,"\n");
+
+ initSpectrum();
 
  // Collect the light sources for explicit light sampling
  num_lights=0;
