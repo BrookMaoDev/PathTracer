@@ -70,6 +70,13 @@ void buildScene(void)
 #ifdef __USE_DISPERSION
  o->dispersion=DISPERSION_B;		// Exaggerated (real crown glass is ~0.0042) so the rainbow is easy to see
 #endif
+#ifdef __DEMO_MAPPING
+ // Diffuse stone with a colour texture and a normal map instead of glass
+ o->diffPct=1;
+ o->tranPct=0;
+ loadTexture(o,"./textures/colors/Poliigon_StoneQuartzite_8060_BaseColor.ppm",1,&texture_list);
+ loadTexture(o,"./textures/normals/Poliigon_StoneQuartzite_8060_Normal.ppm",2,&texture_list);
+#endif
  insertObject(o,&object_list);
 
  o=newSphere(0.0,1.0,0.0,.99,.99,.99,.05,2.47);		// Reflect
@@ -85,6 +92,13 @@ void buildScene(void)
  o->col.B=0.29;
  o->brdf=&GGX;
  o->roughness=GGX_DEMO_ROUGHNESS;
+#endif
+#ifdef __DEMO_MAPPING
+ // Diffuse gold paint with a lattice alpha map instead of a mirror (light and rays pass through the holes)
+ o->diffPct=1;
+ o->reflPct=0;
+ loadTexture(o,"./textures/colors/Poliigon_MetalGoldPaint_7253_BaseColor.ppm",1,&texture_list);
+ loadTexture(o,"./textures/alphas/lattice.pgm",3,&texture_list);
 #endif
  insertObject(o,&object_list);
 

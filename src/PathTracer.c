@@ -191,6 +191,31 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   return;
  }
 
+ // Alpha map: the surface is only partly there, so with probability 1-alpha the ray passes straight through
+ if (obj->alphaMap)
+ {
+  double alpha;
+  alphaMap(obj->alphaMap,a,b,&alpha);
+  if (rand01()>=alpha)
+  {
+   next_ray=newRay(&p,&ray->d);
+   next_ray->R=ray->R;
+   next_ray->G=ray->G;
+   next_ray->B=ray->B;
+   next_ray->Ir=ray->Ir;
+   next_ray->Ig=ray->Ig;
+   next_ray->Ib=ray->Ib;
+   next_ray->wavelength=ray->wavelength;
+   PathTrace(next_ray,depth+1,col,obj,CEL);
+   free(next_ray);
+   return;
+  }
+ }
+
+ // Surface colour: from the texture if the object has one
+ struct colourRGB surf=obj->col;
+ if (obj->texImg) obj->textureMap(obj->texImg,a,b,&surf.R,&surf.G,&surf.B);
+
  // Russian roulette: continue with probability q, and boost survivors by 1/q so the estimate stays unbiased
  if (depth>=RR_START_DEPTH)
  {
@@ -250,16 +275,16 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   // value is unchanged.
   double costheta=sqrt(rand01());
   sampleAround(&n,costheta,2*PI*rand01(),&d);
-  R=obj->col.R;
-  G=obj->col.G;
-  B=obj->col.B;
+  R=surf.R;
+  G=surf.G;
+  B=surf.B;
 #else
   // Uniform hemisphere sample around n
   double costheta=rand01();
   sampleAround(&n,costheta,2*PI*rand01(),&d);
-  R=obj->col.R*2*costheta;
-  G=obj->col.G*2*costheta;
-  B=obj->col.B*2*costheta;
+  R=surf.R*2*costheta;
+  G=surf.G*2*costheta;
+  B=surf.B*2*costheta;
 #endif
  }
 
@@ -272,19 +297,31 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
   {
    int li=(int)(rand01()*num_lights);
    struct object3D *ls=light_list[li];
-   struct point3D l;
+   struct point3D l,l_point;
    ls->randomPoint(ls,&l.px,&l.py,&l.pz);
    l.pw=1;
+   l_point=l;
    subVectors(&p,&l);		// l = light point - p, unnormalized so the sampled point is at lambda = 1
    double ndotl=dot(&n,&l);
    if (ndotl>0)			// Light is in front of the surface
    {
-    struct ray3D *shadow=newRay(&p,&l);
-    struct object3D *s_obj;
-    struct point3D s_p,s_n;
-    double s_lambda,s_a,s_b;
-    findFirstHit(shadow,&s_lambda,obj,&s_obj,&s_p,&s_n,&s_a,&s_b);
-    free(shadow);
+    struct object3D *s_obj, *s_from_obj=obj;
+    struct point3D s_p,s_n,s_from=p,s_l=l;
+    double s_lambda,s_a,s_b,s_alpha;
+    while (1)
+    {
+     struct ray3D *shadow=newRay(&s_from,&s_l);
+     findFirstHit(shadow,&s_lambda,s_from_obj,&s_obj,&s_p,&s_n,&s_a,&s_b);
+     free(shadow);
+     if (s_obj==NULL || s_obj==ls || s_obj->alphaMap==NULL) break;
+     alphaMap(s_obj->alphaMap,s_a,s_b,&s_alpha);
+     if (rand01()<s_alpha) break;	// Blocked by the solid part of an alpha-mapped surface
+     // Through a hole: continue from the blocker toward the same light point, which is again at lambda = 1
+     s_from=s_p;
+     s_from_obj=s_obj;
+     s_l=l_point;
+     subVectors(&s_from,&s_l);
+    }
     if (s_obj==ls && fabs(1-s_lambda)<EPSILON)	// Unblocked: the first hit is the sampled point on the light
     {
      double dist2=dot(&l,&l);
@@ -306,9 +343,9 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
       }
       else
       {
-       fR=obj->col.R/PI;
-       fG=obj->col.G/PI;
-       fB=obj->col.B/PI;
+       fR=surf.R/PI;
+       fG=surf.G/PI;
+       fB=surf.B/PI;
       }
       double w=fmin(PI,light_area[li]*cos_p*cos_ls/dist2)*num_lights;
       ray->Ir+=ray->R*fR*ls->col.R*w;
@@ -331,9 +368,9 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
    double tilt=obj->refl_sig*sqrt(-2*log(1-rand01()))*cos(2*PI*rand01());
    sampleAround(&mirror,cos(tilt),2*PI*rand01(),&d);
   } while (dot(&d,&n)<=0);	// Re-sample directions that point into the surface
-  R=obj->col.R;
-  G=obj->col.G;
-  B=obj->col.B;
+  R=surf.R;
+  G=surf.G;
+  B=surf.B;
  }
  else
  {
@@ -376,9 +413,9 @@ void PathTrace(struct ray3D *ray, int depth, struct colourRGB *col, struct objec
     normalize(&d);
    }
   }
-  R=obj->col.R;
-  G=obj->col.G;
-  B=obj->col.B;
+  R=surf.R;
+  G=surf.G;
+  B=surf.B;
  }
 
  if (R==0 && G==0 && B==0)	// Invalid BRDF sample: the path ends here
